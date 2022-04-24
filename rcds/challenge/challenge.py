@@ -1,9 +1,10 @@
 import base64
 import io
 import re
-import zipfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, cast
+from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
 
 import pathspec  # type: ignore
 
@@ -19,6 +20,30 @@ if TYPE_CHECKING:
 
 def _strip_scheme(url: str) -> str:
     return re.sub(r".*?://", "", url)
+
+
+# adapted from https://stackoverflow.com/a/53742217/7448880
+# by default, `writestr` uses mode 0o600
+# https://github.com/python/cpython/blob/3.10/Lib/zipfile.py#L1792
+# instead, we use 0o100644
+class PermissiveZipFile(ZipFile):
+    def writestr(self, zinfo_or_arcname, data, compress_type=None, compresslevel=None):
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        if not isinstance(zinfo_or_arcname, ZipInfo):
+            zinfo = ZipInfo(
+                filename=zinfo_or_arcname, date_time=time.localtime(time.time())[:6]
+            )
+            zinfo.compress_type = self.compression
+            zinfo._compresslevel = self.compresslevel
+            if zinfo.filename[-1] == "/":
+                zinfo.external_attr = 0o40775 << 16  # drwxrwxr-x
+                zinfo.external_attr |= 0x10  # MS-DOS directory flag
+            else:
+                zinfo.external_attr = 0o100644 << 16  # -rw-r--r--
+        else:
+            zinfo = zinfo_or_arcname
+        super().writestr(zinfo, data, compress_type, compresslevel)
 
 
 class ChallengeLoader:
@@ -111,7 +136,7 @@ class Challenge:
             exclude = pathspec.PathSpec.from_lines("gitwildmatch", spec["exclude"])
         buf: io.BytesIO = io.BytesIO()
         mtime: float = 0.0
-        with zipfile.ZipFile(buf, "w") as zf:
+        with PermissiveZipFile(buf, "w") as zf:
 
             def add(path: Path):
                 nonlocal mtime
@@ -119,9 +144,9 @@ class Challenge:
                     return
                 if path.is_file():
                     mtime = max(mtime, path.stat().st_mtime)
-                    zf.write(path, path.relative_to(base), zipfile.ZIP_DEFLATED)
+                    zf.write(path, path.relative_to(base), ZIP_DEFLATED)
                 elif path.is_dir():
-                    zf.write(path, path.relative_to(base), zipfile.ZIP_STORED)
+                    zf.write(path, path.relative_to(base), ZIP_STORED)
                     for nm in path.iterdir():
                         add(nm)
 
@@ -139,7 +164,7 @@ class Challenge:
                         raise ValueError(
                             "Either `str` or `base64` is required in `additional`"
                         )
-                    zf.writestr(additional["path"], content, zipfile.ZIP_DEFLATED)
+                    zf.writestr(additional["path"], content, ZIP_DEFLATED)
         transaction.add(spec["as"], mtime, buf.getvalue())
 
     def register_asset_source(

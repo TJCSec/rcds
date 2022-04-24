@@ -1,8 +1,8 @@
 import re
 from pathlib import Path
-import os
-import tempfile
+import io
 import zipfile
+import base64
 from typing import TYPE_CHECKING, Any, Callable, Dict, cast
 
 import pathspec
@@ -65,7 +65,7 @@ class Challenge:
     config: Dict[str, Any]
     context: Dict[str, Any]  # overrides to Jinja context
     _asset_manager_context: "AssetManagerContext"
-    _asset_sources: Dict[str, Callable[[Dict[str, Any]], Path]]
+    _asset_sources: Dict[str, Callable[["AssetManagerTransaction", Dict[str, Any]], Path]]
 
     def __init__(self, project: "Project", root: Path, config: dict):
         self.project = project
@@ -92,33 +92,46 @@ class Challenge:
     #             name = provide["as"]
     #         transaction.add_file(name, path)
 
-    def _add_file_asset(self, spec: Dict[str, Any]) -> Path:
+    def _add_file_asset(self, transaction: "AssetManagerTransaction", spec: Dict[str, Any]) -> Path:
         path = self.root / Path(spec["file"])
-        return path
+        transaction.add_file(spec["as"], path)
 
-    def _add_zip_asset(self, spec: Dict[str, Any]) -> Path:
+    def _add_zip_asset(self, transaction: "AssetManagerTransaction", spec: Dict[str, Any]) -> Path:
         exclude: pathspec.PathSpec = None
+        base: Path = self.root
+        if "base" in spec:
+            base = base / spec["base"]
         if "exclude" in spec:
             exclude = pathspec.PathSpec.from_lines("gitwildmatch", spec["exclude"])
-        fd, fn = tempfile.mkstemp(suffix=".zip")
-        os.close(fd)
-        with zipfile.ZipFile(fn, 'w') as zf:
+        buf: io.BytesIO = io.BytesIO()
+        mtime: float = 0.0
+        with zipfile.ZipFile(buf, 'w') as zf:
             def add(path: Path):
-                if exclude is not None and exclude.match_file(path.relative_to(self.root)):
+                nonlocal mtime
+                if exclude is not None and exclude.match_file(path.relative_to(base)):
                     return
                 if path.is_file():
-                    print(path, path.relative_to(self.root))
-                    zf.write(path, path.relative_to(self.root), zipfile.ZIP_DEFLATED)
+                    mtime = max(mtime, path.stat().st_mtime)
+                    zf.write(path, path.relative_to(base), zipfile.ZIP_DEFLATED)
                 elif path.is_dir():
-                    zf.write(path, path.relative_to(self.root), zipfile.ZIP_STORED)
+                    zf.write(path, path.relative_to(base), zipfile.ZIP_STORED)
                     for nm in path.iterdir():
                         add(nm)
 
             for glob in spec["files"]:
-                for path in self.root.glob(glob):
+                for path in base.glob(glob):
                     add(path)
 
-        return Path(fn)
+            if "additional" in spec:
+                for add in spec["additional"]:
+                    if "str" in add:
+                        content = add["str"]
+                    elif "base64" in add:
+                        content = base64.b64decode(add["base64"])
+                    else:
+                        raise ValueError("Either `str` or `base64` is required in `additional`")
+                    zf.writestr(add["path"], content, zipfile.ZIP_DEFLATED)
+        transaction.add(spec["as"], mtime, buf.getvalue())
 
     def register_asset_source(
         self, kind: str, do_add: Callable[["AssetManagerTransaction"], None]
@@ -138,11 +151,9 @@ class Challenge:
         for provide in self.config["provide"]:
             if isinstance(provide, str):
                 path = self.root / Path(provide)
-                name = path.name
+                transaction.add_file(path.name, path)
             else:
-                path = self._asset_sources[provide["kind"]](provide["spec"])
-                name = provide["as"]
-            transaction.add_file(name, path)
+                self._asset_sources[provide["kind"]](transaction, provide["spec"])
         return transaction
 
     def get_asset_manager_context(self) -> "AssetManagerContext":

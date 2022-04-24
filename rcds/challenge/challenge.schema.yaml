@@ -100,14 +100,16 @@ properties:
                 type: string
                 description: >-
                   Path to the file to provide
-          as:
-            type: string
-            description: >-
-              Name of file as shown to competitors
+              as:
+                type: string
+                description: >-
+                  Name of file as shown to competitors
+            required:
+              - file
+              - as
         required:
           - kind
           - spec
-          - as
       - type: object
         properties:
           kind:
@@ -115,6 +117,14 @@ properties:
           spec:
             type: object
             properties:
+              as:
+                type: string
+                description: >-
+                  Name of file as shown to competitors
+              base:
+                type: string
+                description: >-
+                  Base directory for archiving
               files:
                 type: array
                 description: >-
@@ -123,6 +133,30 @@ properties:
                   type: string
                   description: >-
                     Glob of file(s) to provide
+              additional:
+                type: array
+                description: >-
+                  Additional files to include in archive
+                items:
+                  type: object
+                  properties:
+                    path:
+                      type: string
+                      description: >-
+                        Path in archive
+                    str:
+                      type: string
+                      description: >-
+                        Additional file contents, as raw string
+                    base64:
+                      type: string
+                      description: >-
+                        Additional file contents, as base64 string
+                  required:
+                    - path
+                  anyOf:
+                    - required: ["str"]
+                    - required: ["base64"]
               exclude:
                 type: array
                 description: >-
@@ -131,14 +165,10 @@ properties:
                   type: string
             required:
               - files
-          as:
-            type: string
-            description: >-
-              Name of file as shown to competitors
+              - as
         required:
           - kind
           - spec
-          - as
 
   # Runtime (containers)
   deployed:

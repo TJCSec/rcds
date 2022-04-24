@@ -1,11 +1,11 @@
-import re
-from pathlib import Path
-import io
-import zipfile
 import base64
+import io
+import re
+import zipfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, cast
 
-import pathspec
+import pathspec  # type: ignore
 
 from ..util import SUPPORTED_EXTENSIONS, deep_merge, find_files
 from .config import ConfigLoader
@@ -65,7 +65,9 @@ class Challenge:
     config: Dict[str, Any]
     context: Dict[str, Any]  # overrides to Jinja context
     _asset_manager_context: "AssetManagerContext"
-    _asset_sources: Dict[str, Callable[["AssetManagerTransaction", Dict[str, Any]], Path]]
+    _asset_sources: Dict[
+        str, Callable[["AssetManagerTransaction", Dict[str, Any]], None]
+    ]
 
     def __init__(self, project: "Project", root: Path, config: dict):
         self.project = project
@@ -92,11 +94,15 @@ class Challenge:
     #             name = provide["as"]
     #         transaction.add_file(name, path)
 
-    def _add_file_asset(self, transaction: "AssetManagerTransaction", spec: Dict[str, Any]) -> Path:
+    def _add_file_asset(
+        self, transaction: "AssetManagerTransaction", spec: Dict[str, Any]
+    ) -> None:
         path = self.root / Path(spec["file"])
         transaction.add_file(spec["as"], path)
 
-    def _add_zip_asset(self, transaction: "AssetManagerTransaction", spec: Dict[str, Any]) -> Path:
+    def _add_zip_asset(
+        self, transaction: "AssetManagerTransaction", spec: Dict[str, Any]
+    ) -> None:
         exclude: pathspec.PathSpec = None
         base: Path = self.root
         if "base" in spec:
@@ -105,7 +111,8 @@ class Challenge:
             exclude = pathspec.PathSpec.from_lines("gitwildmatch", spec["exclude"])
         buf: io.BytesIO = io.BytesIO()
         mtime: float = 0.0
-        with zipfile.ZipFile(buf, 'w') as zf:
+        with zipfile.ZipFile(buf, "w") as zf:
+
             def add(path: Path):
                 nonlocal mtime
                 if exclude is not None and exclude.match_file(path.relative_to(base)):
@@ -123,18 +130,22 @@ class Challenge:
                     add(path)
 
             if "additional" in spec:
-                for add in spec["additional"]:
-                    if "str" in add:
-                        content = add["str"]
-                    elif "base64" in add:
-                        content = base64.b64decode(add["base64"])
+                for additional in spec["additional"]:
+                    if "str" in additional:
+                        content = additional["str"]
+                    elif "base64" in additional:
+                        content = base64.b64decode(additional["base64"])
                     else:
-                        raise ValueError("Either `str` or `base64` is required in `additional`")
-                    zf.writestr(add["path"], content, zipfile.ZIP_DEFLATED)
+                        raise ValueError(
+                            "Either `str` or `base64` is required in `additional`"
+                        )
+                    zf.writestr(additional["path"], content, zipfile.ZIP_DEFLATED)
         transaction.add(spec["as"], mtime, buf.getvalue())
 
     def register_asset_source(
-        self, kind: str, do_add: Callable[["AssetManagerTransaction"], None]
+        self,
+        kind: str,
+        do_add: Callable[["AssetManagerTransaction", Dict[str, Any]], None],
     ) -> None:
         """
         Register a function to add assets to the transaction for this challenge.

@@ -166,8 +166,10 @@ class ConfigLoader:
                 for f in config["provide"]:
                     if isinstance(f, str):
                         f = Path(f)
+                    elif f["kind"] == "file":
+                        f = Path(f["spec"]["file"])
                     else:
-                        f = Path(f["file"])
+                        continue
                     if not (root / f).is_file():
                         yield TargetFileNotFoundError(
                             f'`provide` references file "{str(f)}" which does not '

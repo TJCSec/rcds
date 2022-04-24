@@ -101,7 +101,9 @@ class ContainerBackend(rcds.backend.BackendContainerRuntime):
                 "config": container_config,
             }
             if expose_config is not None:
-                container_env.globals["container"]["expose"] = expose_config
+                container_env.globals["container"][
+                    "expose"
+                ] = expose_config  # type: ignore
 
             render_and_append(container_env, "deployment.yaml")
             render_and_append(container_env, "service.yaml")

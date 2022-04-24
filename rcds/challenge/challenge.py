@@ -1,6 +1,11 @@
+import base64
+import io
 import re
+import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, cast
+
+import pathspec  # type: ignore
 
 from ..util import SUPPORTED_EXTENSIONS, deep_merge, find_files
 from .config import ConfigLoader
@@ -60,7 +65,9 @@ class Challenge:
     config: Dict[str, Any]
     context: Dict[str, Any]  # overrides to Jinja context
     _asset_manager_context: "AssetManagerContext"
-    _asset_sources: List[Callable[["AssetManagerTransaction"], None]]
+    _asset_sources: Dict[
+        str, Callable[["AssetManagerTransaction", Dict[str, Any]], None]
+    ]
 
     def __init__(self, project: "Project", root: Path, config: dict):
         self.project = project
@@ -70,37 +77,94 @@ class Challenge:
         self._asset_manager_context = self.project.asset_manager.create_context(
             self.config["id"]
         )
-        self._asset_sources = []
+        self._asset_sources = {}
 
-        self.register_asset_source(self._add_static_assets)
+        self.register_asset_source("file", self._add_file_asset)
+        self.register_asset_source("zip", self._add_zip_asset)
 
-    def _add_static_assets(self, transaction: "AssetManagerTransaction") -> None:
-        if "provide" not in self.config:
-            return
-        for provide in self.config["provide"]:
-            if isinstance(provide, str):
-                path = self.root / Path(provide)
-                name = path.name
-            else:
-                path = self.root / Path(provide["file"])
-                name = provide["as"]
-            transaction.add_file(name, path)
+    # def _add_static_assets(self, transaction: "AssetManagerTransaction") -> None:
+    #     if "provide" not in self.config:
+    #         return
+    #     for provide in self.config["provide"]:
+    #         if isinstance(provide, str):
+    #             path = self.root / Path(provide)
+    #             name = path.name
+    #         else:
+    #             path = self.root / Path(provide["file"])
+    #             name = provide["as"]
+    #         transaction.add_file(name, path)
+
+    def _add_file_asset(
+        self, transaction: "AssetManagerTransaction", spec: Dict[str, Any]
+    ) -> None:
+        path = self.root / Path(spec["file"])
+        transaction.add_file(spec["as"], path)
+
+    def _add_zip_asset(
+        self, transaction: "AssetManagerTransaction", spec: Dict[str, Any]
+    ) -> None:
+        exclude: pathspec.PathSpec = None
+        base: Path = self.root
+        if "base" in spec:
+            base = base / spec["base"]
+        if "exclude" in spec:
+            exclude = pathspec.PathSpec.from_lines("gitwildmatch", spec["exclude"])
+        buf: io.BytesIO = io.BytesIO()
+        mtime: float = 0.0
+        with zipfile.ZipFile(buf, "w") as zf:
+
+            def add(path: Path):
+                nonlocal mtime
+                if exclude is not None and exclude.match_file(path.relative_to(base)):
+                    return
+                if path.is_file():
+                    mtime = max(mtime, path.stat().st_mtime)
+                    zf.write(path, path.relative_to(base), zipfile.ZIP_DEFLATED)
+                elif path.is_dir():
+                    zf.write(path, path.relative_to(base), zipfile.ZIP_STORED)
+                    for nm in path.iterdir():
+                        add(nm)
+
+            for glob in spec["files"]:
+                for path in base.glob(glob):
+                    add(path)
+
+            if "additional" in spec:
+                for additional in spec["additional"]:
+                    if "str" in additional:
+                        content = additional["str"]
+                    elif "base64" in additional:
+                        content = base64.b64decode(additional["base64"])
+                    else:
+                        raise ValueError(
+                            "Either `str` or `base64` is required in `additional`"
+                        )
+                    zf.writestr(additional["path"], content, zipfile.ZIP_DEFLATED)
+        transaction.add(spec["as"], mtime, buf.getvalue())
 
     def register_asset_source(
-        self, do_add: Callable[["AssetManagerTransaction"], None]
+        self,
+        kind: str,
+        do_add: Callable[["AssetManagerTransaction", Dict[str, Any]], None],
     ) -> None:
         """
         Register a function to add assets to the transaction for this challenge.
         """
-        self._asset_sources.append(do_add)
+        self._asset_sources[kind] = do_add
 
     def create_transaction(self) -> "AssetManagerTransaction":
         """
         Get a transaction to update this challenge's assets
         """
         transaction = self._asset_manager_context.transaction()
-        for do_add in self._asset_sources:
-            do_add(transaction)
+        if "provide" not in self.config:
+            return transaction
+        for provide in self.config["provide"]:
+            if isinstance(provide, str):
+                path = self.root / Path(provide)
+                transaction.add_file(path.name, path)
+            else:
+                self._asset_sources[provide["kind"]](transaction, provide["spec"])
         return transaction
 
     def get_asset_manager_context(self) -> "AssetManagerContext":

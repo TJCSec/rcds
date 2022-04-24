@@ -91,17 +91,84 @@ properties:
           Path to the file to provide
       - type: object
         properties:
-          file:
-            type: string
-            description: >-
-              Path to the file to provide
-          as:
-            type: string
-            description: >-
-              Name of file as shown to competitors
+          kind:
+            const: file
+          spec:
+            type: object
+            properties:
+              file:
+                type: string
+                description: >-
+                  Path to the file to provide
+              as:
+                type: string
+                description: >-
+                  Name of file as shown to competitors
+            required:
+              - file
+              - as
         required:
-        - file
-        - as
+          - kind
+          - spec
+      - type: object
+        properties:
+          kind:
+            const: zip
+          spec:
+            type: object
+            properties:
+              as:
+                type: string
+                description: >-
+                  Name of file as shown to competitors
+              base:
+                type: string
+                description: >-
+                  Base directory for archiving
+              files:
+                type: array
+                description: >-
+                  Files to provide in archive
+                items:
+                  type: string
+                  description: >-
+                    Glob of file(s) to provide
+              additional:
+                type: array
+                description: >-
+                  Additional files to include in archive
+                items:
+                  type: object
+                  properties:
+                    path:
+                      type: string
+                      description: >-
+                        Path in archive
+                    str:
+                      type: string
+                      description: >-
+                        Additional file contents, as raw string
+                    base64:
+                      type: string
+                      description: >-
+                        Additional file contents, as base64 string
+                  required:
+                    - path
+                  anyOf:
+                    - required: ["str"]
+                    - required: ["base64"]
+              exclude:
+                type: array
+                description: >-
+                  Pathspecs to exclude from archive
+                items:
+                  type: string
+            required:
+              - files
+              - as
+        required:
+          - kind
+          - spec
 
   # Runtime (containers)
   deployed:

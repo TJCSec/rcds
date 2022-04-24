@@ -10,8 +10,10 @@ description: |
 
 provide:
 - ./flag.txt
-- file: ./flag.txt
-  as: other-file.txt
+- kind: file
+  spec:
+    file: ./flag.txt
+    as: other-file.txt
 
 containers:
   main:

@@ -13,7 +13,7 @@ provide:
 - kind: file
   spec:
     file: ./flag.txt
-  as: other-file.txt
+    as: other-file.txt
 
 containers:
   main:

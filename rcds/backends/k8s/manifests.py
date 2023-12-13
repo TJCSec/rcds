@@ -63,7 +63,7 @@ def sync_manifests(all_manifests: Iterable[Dict[str, Any]]):
     server_namespaces_names: Set[str] = set(
         map(
             lambda ns: ns.metadata.name,
-            v1.list_namespace(label_selector="app.kubernetes.io/managed-by=rcds").items,
+            v1.list_namespace(label_selector="app.kubernetes.io/managed-by=winter-rcds").items,
         )
     )
 

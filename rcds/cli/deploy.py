@@ -43,3 +43,29 @@ def deploy() -> None:
         project.scoreboard_backend.commit()
     else:
         click.echo("WARN: no scoreboard backend, skipping...")
+
+@click.command()
+def test() -> None:
+    try:
+        project_config = find_files(["rcds"], SUPPORTED_EXTENSIONS, recurse=True)[
+            "rcds"
+        ].parent
+    except KeyError:
+        click.echo("Could not find project root!")
+        exit(1)
+    click.echo(f"Loading project at {project_config}")
+    project = rcds.Project(project_config)
+    click.echo("Initializing backends")
+    project.load_backends()
+    click.echo("Loading challenges")
+    project.load_all_challenges()
+    for challenge in project.challenges.values():
+        cm = rcds.challenge.docker.ContainerManager(challenge)
+        for container_name, container in cm.containers.items():
+            click.echo(f"{challenge.config['id']}: checking container {container_name}")
+            if not container.is_built():
+                click.echo(
+                    f"{challenge.config['id']}: building container {container_name}"
+                    f" ({container.get_full_tag()})"
+                )
+                container.build()

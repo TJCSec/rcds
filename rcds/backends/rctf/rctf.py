@@ -26,13 +26,13 @@ class RCTFAdminV1:
                 )
 
     @staticmethod
-    def assertResponseKind(response: Any, kind: str) -> None:
-        if response["kind"] != kind:
+    def assertResponseKind(response: Any, *kinds: str) -> None:
+        if response["kind"] not in kinds:
             raise RuntimeError(f"Server error: {response['kind']}")
 
     def list_challenges(self) -> List[Dict[str, Any]]:
         r = self.session.get("challs").json()
-        self.assertResponseKind(r, "goodChallenges")
+        self.assertResponseKind(r, "goodChallenges", "goodAdminChallenges")
         return r["data"]
 
     def put_challenge(self, chall_id: str, data: Dict[str, Any]) -> None:
